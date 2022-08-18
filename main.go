@@ -1,16 +1,15 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/NurettinSelim/gdg-turkey-events-backend/database"
-	"io"
+	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"strconv"
 )
 
-func getRoot(w http.ResponseWriter, r *http.Request) {
+func getRoot(c *gin.Context) {
 	type Author struct {
 		Github string `json:"github"`
 		Email  string `json:"email"`
@@ -25,69 +24,55 @@ func getRoot(w http.ResponseWriter, r *http.Request) {
 		},
 		Version: "2.0.0",
 	}
-	jsonData, _ := json.Marshal(data)
-
-	io.WriteString(w, string(jsonData))
+	c.JSON(http.StatusOK, data)
 }
 
-func getEvents(w http.ResponseWriter, r *http.Request) {
-	queryType := database.QueryType(r.URL.Query().Get("queryType"))
+func getEvents(c *gin.Context) {
+	queryType := database.QueryType(c.Query("queryType"))
 
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	page, err := strconv.Atoi(c.Query("page"))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, fmt.Sprintf(`{"error":"Error occured while parsing %v"}`, page))
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error occured while parsing %v", page)})
 		return
 	}
 
-	pageSize, err := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	pageSize, err := strconv.Atoi(c.Query("pageSize"))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, fmt.Sprintf(`{"error":"Error occured while parsing %v"}`, pageSize))
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error occured while parsing %v", pageSize)})
 		return
-
 	}
 
 	if !database.ValidQueries[queryType] {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `{"error": "Wrong query parameter"}`)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Wrong query parameter"})
 		return
-
 	}
 
 	fsDatabase := database.FsDatabase{}
-	err = fsDatabase.Init()
-	if err != nil {
-		io.WriteString(w, "Error")
+
+	if err = fsDatabase.Init(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	defer fsDatabase.Close()
 
 	events, err := fsDatabase.GetEvents(queryType, page, pageSize)
-
 	if err != nil {
-		io.WriteString(w, "Error")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	jsonData, _ := json.Marshal(events)
-
-	io.WriteString(w, string(jsonData))
+	c.JSON(http.StatusOK, events)
 }
 func main() {
-	//gdgApi := api.GDGApi{}
-	//events := gdgApi.GetEvents()
+	r := gin.Default()
+	r.GET("/", getRoot)
 
-	//fsDatabase := database.FsDatabase{}
-	//err := fsDatabase.Init()
-	//defer fsDatabase.Close()
-	//fmt.Println(fsDatabase.GetEventIds())
-	//err = fsDatabase.SaveEvents(events)
+	api := r.Group("/api")
+	{
+		api.GET("/events", getEvents)
+	}
 
-	http.HandleFunc("/", getRoot)
-	http.HandleFunc("/api/events", getEvents)
-
-	err := http.ListenAndServe(":4000", nil)
+	err := r.Run(":4000")
 	if err != nil {
 		log.Fatal(err)
 		return
